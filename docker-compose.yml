@@ -1,0 +1,14 @@
+services:
+  sql-lineage-tracker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sql-lineage-tracker
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ./backend:/app
+      - ./backend/frontend:/app/frontend
+    restart: unless-stopped

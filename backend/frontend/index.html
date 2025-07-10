@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Data Lineage Tracker</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>SQL Data Lineage Tracker</h1>
+            <p>Parse SQL queries and visualize data dependencies</p>
+        </header>
+        
+        <main>
+            <div class="input-section">
+                <div class="input-group">
+                    <label for="sql-input">SQL Query:</label>
+                    <textarea id="sql-input" placeholder="Enter your SQL query here...
+Example:
+SELECT u.name, u.email, o.total
+FROM users u
+JOIN orders o ON u.id = o.user_id
+WHERE o.status = 'completed'"></textarea>
+                </div>
+                
+                <div class="button-group">
+                    <button id="parse-btn" class="btn-primary">Parse & Visualize</button>
+                    <button id="clear-btn" class="btn-secondary">Clear</button>
+                    <button id="example-btn" class="btn-secondary">Load Example</button>
+                </div>
+            </div>
+            
+            <div class="output-section">
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="visualization">Visualization</button>
+                    <button class="tab-btn" data-tab="details">Details</button>
+                    <button class="tab-btn" data-tab="json">JSON Output</button>
+                </div>
+                
+                <div class="tab-content">
+                    <div id="visualization" class="tab-pane active">
+                        <div id="graph-container">
+                            <div id="graph-placeholder">
+                                <p>Enter a SQL query above and click "Parse & Visualize" to see the data lineage graph.</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="details" class="tab-pane">
+                        <div id="details-content">
+                            <p>Query details will appear here after parsing.</p>
+                        </div>
+                    </div>
+                    
+                    <div id="json" class="tab-pane">
+                        <pre id="json-output">JSON output will appear here after parsing.</pre>
+                    </div>
+                </div>
+            </div>
+        </main>
+        
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Parsing SQL query...</p>
+        </div>
+        
+        <div id="error-message" class="error hidden"></div>
+    </div>
+    
+    <script src="/static/script.js"></script>
+</body>
+</html>
