@@ -10,5 +10,4 @@ services:
       - PYTHONPATH=/app
     volumes:
       - ./backend:/app
-      - ./backend/frontend:/app/frontend
     restart: unless-stopped
