@@ -30,7 +30,8 @@ sql_parser = SQLParser()
 lineage_builder = LineageBuilder()
 
 # Mount static files
-static_dir = Path(__file__).parent.parent.parent / "frontend"
+static_dir = Path(__file__).parent.parent / "static"
+
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
@@ -48,7 +49,7 @@ async def read_root():
     </head>
     <body>
         <h1>SQL Data Lineage Tracker</h1>
-        <p>Frontend files not found. Please ensure the frontend directory exists.</p>
+        <p>Static files not found. Please ensure the static directory exists.</p>
     </body>
     </html>
     """)
