@@ -191,11 +191,15 @@ class SQLParser:
                 continue
             
             if from_seen and token.ttype is None and not token.is_whitespace:
-                if token.value.upper() not in self.keywords:
-                    table_info = self._parse_table_identifier(token.value)
-                    if table_info:
-                        tables.append(table_info)
-                        from_seen = False
+                # Check if this is a keyword that should end FROM clause parsing
+                if token.value.upper() in ['WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER']:
+                    break
+                    
+                # Parse table with potential alias
+                table_info = self._parse_table_with_alias(token.value)
+                if table_info:
+                    tables.append(table_info)
+                    from_seen = False
         
         return tables
     
@@ -212,7 +216,7 @@ class SQLParser:
                     next_token = tokens[j]
                     if next_token.ttype is None and not next_token.is_whitespace:
                         if next_token.value.upper() not in self.keywords:
-                            table_info = self._parse_table_identifier(next_token.value)
+                            table_info = self._parse_table_with_alias(next_token.value)
                             if table_info:
                                 tables.append(table_info)
                                 joins.append({
@@ -260,6 +264,32 @@ class SQLParser:
         extract_from_parenthesis(parsed)
         return subqueries
     
+    def _parse_table_with_alias(self, table_ref: str) -> Optional[TableInfo]:
+        """Parse table reference with potential alias (schema.table alias)"""
+        if not table_ref or table_ref.upper() in self.keywords:
+            return None
+        
+        # Split by whitespace to separate table name and alias
+        parts = table_ref.strip().split()
+        
+        if len(parts) == 1:
+            # No alias, just table name
+            return self._parse_table_identifier(parts[0])
+        elif len(parts) == 2:
+            # Table name and alias
+            table_info = self._parse_table_identifier(parts[0])
+            if table_info:
+                table_info.alias = parts[1]
+            return table_info
+        elif len(parts) == 3 and parts[1].upper() == 'AS':
+            # Table name AS alias
+            table_info = self._parse_table_identifier(parts[0])
+            if table_info:
+                table_info.alias = parts[2]
+            return table_info
+        
+        return None
+    
     def _parse_table_identifier(self, identifier: str) -> Optional[TableInfo]:
         """Parse table identifier (schema.table or table)"""
         if not identifier or identifier.upper() in self.keywords:
@@ -267,11 +297,11 @@ class SQLParser:
         
         parts = identifier.split('.')
         if len(parts) == 1:
-            return TableInfo(name=parts[0])
+            return TableInfo(name=parts[0], type="table")
         elif len(parts) == 2:
-            return TableInfo(schema=parts[0], name=parts[1])
+            return TableInfo(schema=parts[0], name=parts[1], type="table")
         elif len(parts) == 3:
-            return TableInfo(database=parts[0], schema=parts[1], name=parts[2])
+            return TableInfo(database=parts[0], schema=parts[1], name=parts[2], type="table")
         
         return None
     
@@ -313,7 +343,7 @@ class SQLParser:
             
             if update_seen and token.ttype is None and not token.is_whitespace:
                 if token.value.upper() not in self.keywords:
-                    return self._parse_table_identifier(token.value)
+                    return self._parse_table_with_alias(token.value)
         
         return None
     
@@ -328,7 +358,7 @@ class SQLParser:
             
             if from_seen and token.ttype is None and not token.is_whitespace:
                 if token.value.upper() not in self.keywords:
-                    return self._parse_table_identifier(token.value)
+                    return self._parse_table_with_alias(token.value)
         
         return None
     
@@ -380,9 +410,9 @@ class SQLParser:
         result = []
         
         for table in tables:
-            key = f"{table.database or ''}.{table.schema or ''}.{table.name}"
+            key = f"{table.database or ''}.{table.schema or ''}.{table.name}.{table.alias or ''}"
             if key not in seen:
                 seen.add(key)
                 result.append(table)
         
-        return result                                       
+        return result
