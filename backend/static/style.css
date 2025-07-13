@@ -292,16 +292,21 @@ main {
 
 .node {
     cursor: pointer;
-    transition: all 0.3s;
-}
-
-.node:hover {
-    transform: scale(1.1);
 }
 
 .node circle {
     stroke: #333;
     stroke-width: 2px;
+    transition: none; /* Remove transitions from SVG elements */
+}
+
+.node:hover circle {
+    stroke-width: 2px; /* Keep the same stroke-width */
+    filter: none; /* Remove the filter temporarily */
+}
+
+.node:hover text {
+    font-weight: bold;
 }
 
 .node.table circle {
