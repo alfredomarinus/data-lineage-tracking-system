@@ -13,9 +13,10 @@ class QueryType(str, Enum):
 
 class TableInfo(BaseModel):
     name: str
-    # schema: Optional[str] = None
+    schema: Optional[str] = None  # Uncommented this line
     database: Optional[str] = None
     alias: Optional[str] = None
+    type: str = "table"  # Added type field
 
 class ColumnInfo(BaseModel):
     name: str
@@ -33,8 +34,10 @@ class QueryAnalysis(BaseModel):
 class LineageNode(BaseModel):
     id: str
     type: str
-    # schema: Optional[str] = None
+    name: str  # Added name field
+    schema: Optional[str] = None  # Uncommented this line
     database: Optional[str] = None
+    alias: Optional[str] = None  # Added alias field
 
 class LineageEdge(BaseModel):
     source: str
