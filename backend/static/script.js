@@ -263,20 +263,9 @@ class SQLLineageParser {
         }
     }
     
-    // Fixed isValidColumnName method to be more permissive
     isValidColumnName(name) {
-        if (!name || typeof name !== 'string') return false;
-        
-        // Remove any whitespace
-        name = name.trim();
-        
         // Check if it's a valid column name (starts with letter or underscore)
-        const isValidFormat = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name);
-        
-        // Check if it's not a SQL keyword
-        const isNotKeyword = !this.isSQLKeyword(name);
-        
-        return isValidFormat && isNotKeyword;
+        return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name) && !this.isSQLKeyword(name);
     }
     
     isSQLKeyword(word) {
@@ -487,19 +476,14 @@ class SQLLineageVisualizer {
         return normalized;
     }
     
-    // Updated methods for the SQLLineageVisualizer class
     createSampleDataFromSQL(normalized) {
         const sqlInput = document.getElementById('sql-input').value;
         
         // Use the lineage parser to extract tables and columns
         const result = this.lineageParser.parseSQL(sqlInput);
         
-        // Extract table information with proper alias handling
-        const tableInfo = this.extractTableInfoWithAliases(sqlInput);
-        
-        // Add tables (use actual table names, not aliases)
-        const uniqueTables = [...new Set(tableInfo.map(t => t.tableName))];
-        uniqueTables.forEach((table, index) => {
+        // Add tables
+        result.tables.forEach((table, index) => {
             normalized.nodes.push({
                 id: `table_${index}`,
                 name: table,
@@ -518,7 +502,7 @@ class SQLLineageVisualizer {
         });
         
         // Add main query
-        if (uniqueTables.length > 0 || columnsWithAliases.length > 0) {
+        if (result.tables.length > 0 || columnsWithAliases.length > 0) {
             normalized.nodes.push({
                 id: 'main_query',
                 name: 'Main Query',
@@ -527,50 +511,9 @@ class SQLLineageVisualizer {
         }
         
         // Create relationships based on SQL patterns
-        this.createRelationshipsFromSQL(normalized, sqlInput, uniqueTables, columnsWithAliases);
+        this.createRelationshipsFromSQL(normalized, sqlInput, result.tables, columnsWithAliases);
     }
 
-    // New method to extract table information with aliases
-    extractTableInfoWithAliases(sql) {
-        const tableInfo = [];
-        
-        // Extract FROM clause table and alias
-        const fromMatch = sql.match(/FROM\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*(?:AS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)?/i);
-        if (fromMatch) {
-            const fullTableName = fromMatch[1];
-            const tableName = fullTableName.split('.').pop(); // Remove schema if present
-            const alias = fromMatch[2] || tableName;
-            tableInfo.push({
-                tableName: tableName,
-                alias: alias.toLowerCase(),
-                fullName: fullTableName
-            });
-        }
-        
-        // Extract JOIN clauses with aliases
-        const joinRegex = /(?:INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|FULL\s+JOIN|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*(?:AS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)?/gi;
-        let joinMatch;
-        
-        while ((joinMatch = joinRegex.exec(sql)) !== null) {
-            const fullTableName = joinMatch[1];
-            const tableName = fullTableName.split('.').pop(); // Remove schema if present
-            const alias = joinMatch[2] || tableName;
-            
-            // Check if this table is already in the list
-            const exists = tableInfo.some(t => t.tableName === tableName);
-            if (!exists) {
-                tableInfo.push({
-                    tableName: tableName,
-                    alias: alias.toLowerCase(),
-                    fullName: fullTableName
-                });
-            }
-        }
-        
-        return tableInfo;
-    }
-
-    // Updated extractColumnsWithAliases method
     extractColumnsWithAliases(sql) {
         const columnRegex = /SELECT\s+(.*?)\s+FROM/si;
         const match = sql.match(columnRegex);
@@ -579,12 +522,8 @@ class SQLLineageVisualizer {
         const selectClause = match[1];
         const columns = [];
         
-        // Get table info for resolving aliases
-        const tableInfo = this.extractTableInfoWithAliases(sql);
-        const aliasToTableMap = {};
-        tableInfo.forEach(t => {
-            aliasToTableMap[t.alias] = t.tableName;
-        });
+        // Parse table column relationships to get actual source columns
+        const tableColumnMap = this.parseTableColumnRelationships(sql);
         
         // Split select clause properly
         const parts = this.splitSelectClause(selectClause);
@@ -592,35 +531,33 @@ class SQLLineageVisualizer {
         parts.forEach(part => {
             const trimmedPart = part.trim();
             
-            // Skip if it's just SELECT *
-            if (trimmedPart === '*') {
-                return;
-            }
-            
             // Handle aliases (AS keyword)
             if (trimmedPart.toUpperCase().includes(' AS ')) {
                 const asMatch = trimmedPart.match(/^(.*?)\s+AS\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
                 if (asMatch) {
-                    const sourceExpr = asMatch[1].trim();
                     const alias = asMatch[2].trim();
-                    
-                    // Add the alias as a column
                     columns.push(alias);
-                    
-                    // Also extract the source column if it's a simple table.column reference
-                    const sourceColumns = this.extractColumnNamesFromExpression(sourceExpr, aliasToTableMap);
-                    sourceColumns.forEach(col => {
-                        if (!columns.includes(col)) {
-                            columns.push(col);
-                        }
-                    });
                     return;
                 }
             }
             
-            // Handle table.column references (with or without aliases)
-            const columnNames = this.extractColumnNamesFromExpression(trimmedPart, aliasToTableMap);
-            columnNames.forEach(col => {
+            // Handle table.column references
+            if (trimmedPart.includes('.')) {
+                const parts = trimmedPart.split('.');
+                if (parts.length >= 2) {
+                    let columnName = parts[1].trim();
+                    // Clean up any function calls
+                    columnName = columnName.replace(/[()]/g, '').replace(/\s+as\s+.*/i, '');
+                    if (columnName && !columns.includes(columnName)) {
+                        columns.push(columnName);
+                    }
+                }
+            }
+        });
+        
+        // Add all source columns from table column map
+        Object.values(tableColumnMap).forEach(tableCols => {
+            tableCols.forEach(col => {
                 if (!columns.includes(col)) {
                     columns.push(col);
                 }
@@ -630,43 +567,11 @@ class SQLLineageVisualizer {
         return [...new Set(columns)];
     }
 
-    // New helper method to extract column names from expressions
-    extractColumnNamesFromExpression(expression, aliasToTableMap) {
-        const columns = [];
-        
-        // Handle table.column references (with potential aliases)
-        const tableColumnRegex = /([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)/g;
-        let match;
-        
-        while ((match = tableColumnRegex.exec(expression)) !== null) {
-            const tableOrAlias = match[1].toLowerCase();
-            const columnName = match[2];
-            
-            // The column name is what we want to track, regardless of the table/alias
-            columns.push(columnName);
-        }
-        
-        // Handle simple column references (no table prefix)
-        if (columns.length === 0) {
-            // Check if it's a simple column name (not a function or complex expression)
-            const simpleColumnMatch = expression.match(/^([a-zA-Z_][a-zA-Z0-9_]*)$/);
-            if (simpleColumnMatch) {
-                columns.push(simpleColumnMatch[1]);
-            }
-        }
-        
-        return columns;
-    }
-
-    // Updated createRelationshipsFromSQL method
     createRelationshipsFromSQL(normalized, sql, tables, columns) {
         const sqlUpper = sql.toUpperCase();
         
-        // Get table info with aliases
-        const tableInfo = this.extractTableInfoWithAliases(sql);
-        
         // Parse the SQL to extract table-column relationships more accurately
-        const tableColumnMap = this.parseTableColumnRelationshipsWithAliases(sql, tableInfo);
+        const tableColumnMap = this.parseTableColumnRelationships(sql);
         
         // 1. Create accurate table-provides-column relationships
         Object.entries(tableColumnMap).forEach(([tableName, tableColumns]) => {
@@ -675,40 +580,15 @@ class SQLLineageVisualizer {
                 tableColumns.forEach(columnName => {
                     const columnIndex = columns.findIndex(c => c.toLowerCase() === columnName.toLowerCase());
                     if (columnIndex !== -1) {
-                        // FIXED: Ensure this relationship is created
-                        const existingRelationship = normalized.edges.find(e => 
-                            e.source === `table_${tableIndex}` && 
-                            e.target === `column_${columnIndex}` && 
-                            e.type === 'provides'
-                        );
-                        
-                        if (!existingRelationship) {
-                            normalized.edges.push({
-                                source: `table_${tableIndex}`,
-                                target: `column_${columnIndex}`,
-                                type: 'provides'
-                            });
-                        }
+                        normalized.edges.push({
+                            source: `table_${tableIndex}`,
+                            target: `column_${columnIndex}`,
+                            type: 'provides'
+                        });
                     }
                 });
             }
         });
-        
-        // FIXED: If no relationships found yet, create default relationships
-        // This handles simple cases like "SELECT column_a FROM table_a"
-        if (normalized.edges.length === 0 && tables.length > 0 && columns.length > 0) {
-            // For simple queries, assume all columns come from the first table
-            const mainTableIndex = 0;
-            columns.forEach((column, columnIndex) => {
-                if (column !== '*') {
-                    normalized.edges.push({
-                        source: `table_${mainTableIndex}`,
-                        target: `column_${columnIndex}`,
-                        type: 'provides'
-                    });
-                }
-            });
-        }
         
         // 2. Columns flow to query (SELECT columns)
         if (normalized.nodes.find(n => n.id === 'main_query')) {
@@ -732,123 +612,51 @@ class SQLLineageVisualizer {
             }
         });
         
-        // Rest of the method remains the same...
-        // (WHERE, UPDATE, INSERT handling)
-    }
-
-    // New helper method to parse table-column relationships with proper alias handling
-    parseTableColumnRelationshipsWithAliases(sql, tableInfo) {
-        const tableColumnMap = {};
+        // 4. Handle WHERE clause constraints
+        const whereMatch = sql.match(/WHERE\s+(.+?)(?:\s+GROUP|\s+ORDER|\s+HAVING|\s*;|\s*$)/si);
+        if (whereMatch) {
+            const whereClause = whereMatch[1];
+            columns.forEach((column, columnIndex) => {
+                if (whereClause.toLowerCase().includes(column.toLowerCase())) {
+                    normalized.edges.push({
+                        source: `column_${columnIndex}`,
+                        target: 'main_query',
+                        type: 'constrains'
+                    });
+                }
+            });
+        }
         
-        // Create alias to table name mapping
-        const aliasToTableMap = {};
-        tableInfo.forEach(t => {
-            aliasToTableMap[t.alias] = t.tableName;
-        });
-        
-        // Extract SELECT clause
-        const selectMatch = sql.match(/SELECT\s+(.*?)\s+FROM/si);
-        if (!selectMatch) return tableColumnMap;
-        
-        const selectClause = selectMatch[1];
-        
-        // Parse each column in SELECT clause
-        const columns = this.splitSelectClause(selectClause);
-        
-        columns.forEach(column => {
-            const trimmedColumn = column.trim();
-            
-            // Skip SELECT *
-            if (trimmedColumn === '*') {
-                // For SELECT *, add all columns from all tables
-                tableInfo.forEach(t => {
-                    if (!tableColumnMap[t.tableName]) {
-                        tableColumnMap[t.tableName] = [];
-                    }
-                    tableColumnMap[t.tableName].push('*');
-                });
-                return;
-            }
-            
-            // Extract table.column references from the column expression
-            this.extractTableColumnReferencesWithAliases(trimmedColumn, aliasToTableMap, tableColumnMap);
-            
-            // FIXED: Handle unqualified column names
-            // If no table.column references found, assume column comes from first table
-            if (!trimmedColumn.includes('.') && this.isValidColumnName(trimmedColumn)) {
-                // Get the first table (main table from FROM clause)
-                const mainTable = tableInfo.length > 0 ? tableInfo[0].tableName : null;
-                if (mainTable) {
-                    if (!tableColumnMap[mainTable]) {
-                        tableColumnMap[mainTable] = [];
-                    }
-                    if (!tableColumnMap[mainTable].includes(trimmedColumn)) {
-                        tableColumnMap[mainTable].push(trimmedColumn);
-                    }
+        // 5. Handle UPDATE queries
+        if (sqlUpper.includes('UPDATE')) {
+            const updateMatch = sql.match(/UPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+            if (updateMatch) {
+                const updateTable = updateMatch[1];
+                const updateTableIndex = tables.indexOf(updateTable);
+                if (updateTableIndex !== -1) {
+                    normalized.edges.push({
+                        source: 'main_query',
+                        target: `table_${updateTableIndex}`,
+                        type: 'modifies'
+                    });
                 }
             }
-        });
+        }
         
-        // Also extract columns from WHERE, GROUP BY, ORDER BY clauses
-        this.extractColumnsFromClausesWithAliases(sql, aliasToTableMap, tableColumnMap);
-        
-        return tableColumnMap;
-    }
-
-    extractTableColumnReferencesWithAliases(expression, aliasToTableMap, tableColumnMap) {
-        // Regular expression to match table.column patterns
-        const tableColumnRegex = /([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)/g;
-        let match;
-        
-        while ((match = tableColumnRegex.exec(expression)) !== null) {
-            const tableOrAlias = match[1].toLowerCase();
-            const columnName = match[2];
-            
-            // Resolve table alias to actual table name
-            const actualTableName = aliasToTableMap[tableOrAlias] || tableOrAlias;
-            
-            if (!tableColumnMap[actualTableName]) {
-                tableColumnMap[actualTableName] = [];
+        // 6. Handle INSERT queries
+        if (sqlUpper.includes('INSERT INTO')) {
+            const insertMatch = sql.match(/INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+            if (insertMatch) {
+                const insertTable = insertMatch[1];
+                const insertTableIndex = tables.indexOf(insertTable);
+                if (insertTableIndex !== -1) {
+                    normalized.edges.push({
+                        source: 'main_query',
+                        target: `table_${insertTableIndex}`,
+                        type: 'modifies'
+                    });
+                }
             }
-            
-            if (!tableColumnMap[actualTableName].includes(columnName)) {
-                tableColumnMap[actualTableName].push(columnName);
-            }
-        }
-    }
-
-    // Updated method to extract columns from clauses with proper alias handling
-    extractColumnsFromClausesWithAliases(sql, aliasToTableMap, tableColumnMap) {
-        // Extract from WHERE clause
-        const whereMatch = sql.match(/WHERE\s+(.*?)(?:\s+GROUP\s+BY|\s+ORDER\s+BY|\s+HAVING|\s+LIMIT|\s*;|\s*$)/si);
-        if (whereMatch) {
-            this.extractTableColumnReferencesWithAliases(whereMatch[1], aliasToTableMap, tableColumnMap);
-        }
-        
-        // Extract from GROUP BY clause
-        const groupByMatch = sql.match(/GROUP\s+BY\s+(.*?)(?:\s+HAVING|\s+ORDER\s+BY|\s+LIMIT|\s*;|\s*$)/si);
-        if (groupByMatch) {
-            this.extractTableColumnReferencesWithAliases(groupByMatch[1], aliasToTableMap, tableColumnMap);
-        }
-        
-        // Extract from ORDER BY clause
-        const orderByMatch = sql.match(/ORDER\s+BY\s+(.*?)(?:\s+LIMIT|\s*;|\s*$)/si);
-        if (orderByMatch) {
-            this.extractTableColumnReferencesWithAliases(orderByMatch[1], aliasToTableMap, tableColumnMap);
-        }
-        
-        // Extract from HAVING clause
-        const havingMatch = sql.match(/HAVING\s+(.*?)(?:\s+ORDER\s+BY|\s+LIMIT|\s*;|\s*$)/si);
-        if (havingMatch) {
-            this.extractTableColumnReferencesWithAliases(havingMatch[1], aliasToTableMap, tableColumnMap);
-        }
-        
-        // Extract from JOIN conditions
-        const joinRegex = /(?:INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|FULL\s+JOIN|JOIN)\s+[a-zA-Z_][a-zA-Z0-9_]*(?:\s+(?:AS\s+)?[a-zA-Z_][a-zA-Z0-9_]*)?\s+ON\s+(.*?)(?=\s+(?:INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|FULL\s+JOIN|JOIN)|WHERE|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|;|$)/gi;
-        let joinMatch;
-        
-        while ((joinMatch = joinRegex.exec(sql)) !== null) {
-            this.extractTableColumnReferencesWithAliases(joinMatch[1], aliasToTableMap, tableColumnMap);
         }
     }
 
@@ -1372,40 +1180,6 @@ class SQLLineageVisualizer {
         if (jsonOutput) {
             jsonOutput.textContent = JSON.stringify(data, null, 2);
         }
-    }
-
-    isValidColumnName(name) {
-        if (!name || typeof name !== 'string') return false;
-        
-        // Remove any whitespace
-        name = name.trim();
-        
-        // Check if it's a valid column name (starts with letter or underscore)
-        const isValidFormat = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name);
-        
-        // Check if it's not a SQL keyword
-        const isNotKeyword = !this.isSQLKeyword(name);
-        
-        return isValidFormat && isNotKeyword;
-    }
-
-    // Also add this helper method to the SQLLineageVisualizer class
-    isSQLKeyword(word) {
-        const keywords = [
-            'SELECT', 'FROM', 'WHERE', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'FULL',
-            'ON', 'AND', 'OR', 'NOT', 'NULL', 'TRUE', 'FALSE', 'COUNT', 'SUM',
-            'AVG', 'MIN', 'MAX', 'GROUP', 'BY', 'ORDER', 'HAVING', 'LIMIT',
-            'DISTINCT', 'AS', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'LIKE',
-            'IN', 'BETWEEN', 'EXISTS', 'ALL', 'ANY', 'SOME', 'UNION', 'INTERSECT',
-            'EXCEPT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP',
-            'TABLE', 'VIEW', 'INDEX', 'DATABASE', 'SCHEMA', 'PRIMARY', 'KEY',
-            'FOREIGN', 'REFERENCES', 'CONSTRAINT', 'UNIQUE', 'CHECK', 'DEFAULT',
-            'AUTO_INCREMENT', 'IDENTITY', 'TIMESTAMP', 'DATETIME', 'DATE', 'TIME',
-            'VARCHAR', 'CHAR', 'TEXT', 'INT', 'INTEGER', 'BIGINT', 'SMALLINT',
-            'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'BOOLEAN', 'BOOL'
-        ];
-        
-        return keywords.includes(word.toUpperCase());
     }
     
     loadExample() {
