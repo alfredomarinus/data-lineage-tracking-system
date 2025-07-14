@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Optional, Set
 from enum import Enum
 
@@ -13,10 +13,10 @@ class QueryType(str, Enum):
 
 class TableInfo(BaseModel):
     name: str
-    schema: Optional[str] = None  # Uncommented this line
+    schema_name: Optional[str] = Field(None, alias="schema")
     database: Optional[str] = None
     alias: Optional[str] = None
-    type: str = "table"  # Added type field
+    type: str = "table"
 
 class ColumnInfo(BaseModel):
     name: str
@@ -34,10 +34,10 @@ class QueryAnalysis(BaseModel):
 class LineageNode(BaseModel):
     id: str
     type: str
-    name: str  # Added name field
-    schema: Optional[str] = None  # Uncommented this line
+    name: str
+    schema_name: Optional[str] = Field(None, alias="schema")
     database: Optional[str] = None
-    alias: Optional[str] = None  # Added alias field
+    alias: Optional[str] = None
 
 class LineageEdge(BaseModel):
     source: str
